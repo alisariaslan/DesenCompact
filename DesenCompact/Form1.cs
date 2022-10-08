@@ -1,4 +1,7 @@
-﻿using Microsoft.SqlServer.Management.Smo;
+﻿using Hardware.Info;
+using Microsoft.SqlServer.Management.Smo;
+using Microsoft.VisualBasic.Devices;
+using Microsoft.Win32;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 using SharpCompress.Common;
@@ -6,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Data.Sql;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.Drawing;
@@ -19,13 +23,25 @@ namespace DesenCompact
 {
     public partial class Form1 : Form
     {
+        SqlConnection sqlConnection;
         string desktop_path;
+        string sql_connection_string;
 
         public Form1()
         {
+            //File.Delete("notlarim.txt");
             InitializeComponent();
             CheckForIllegalCrossThreadCalls = false;
             desktop_path = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            sqlConnection = new SqlConnection("");
+            sql_connection_string = @"Data Source=.\DESENERP; Initial Catalog=DesenPOS; uid=sa; password=DesenErp.12345;";
+            read();
+            if (!File.Exists("notlarim.txt"))
+            {
+                string text = "SPECS\n\n" + getspecs();
+                write(text);
+                read();
+            }
         }
 
         private void log(string message)
@@ -79,7 +95,7 @@ namespace DesenCompact
             log("Malzeme arşivi C:\\DesenPOS yoluna çıkartılıyor... malzeme.rar");
             await extract("malzeme.rar", "C:\\DesenPOS", progressBar1);
             log($"Arşiv çıkarma işlemi tamamlandı.");
-            string shortcut_path = (desktop_path+"\\DesenPOS.lnk");
+            string shortcut_path = (desktop_path + "\\DesenPOS.lnk");
             IWshRuntimeLibrary.WshShell shell = new IWshRuntimeLibrary.WshShell();
             IWshRuntimeLibrary.IWshShortcut sc = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(shortcut_path);
             sc.Description = "some desc";
@@ -91,50 +107,138 @@ namespace DesenCompact
 
         private void button4_Click(object sender, EventArgs e)
         {
-         
-
-
+            log("UPDATE...");
             string Adi = textBox1.Text;
             string VergiNo = textBox2.Text;
             string CustomerId = textBox3.Text;
-            string connectionString = "";
-            string sqlString = "";
-            
-            //SqlConnection sqlConnection = new SqlConnection("connectionString");
-            //SqlCommand sqlCommand = new SqlCommand(sqlString,sqlConnection);
-            //if (sqlConnection.State != ConnectionState.Open)
-            //    sqlConnection.Open();
-            //sqlCommand.ExecuteNonQuery();
-            //sqlConnection.Close();
+            string sqlString = "use DesenPOS;" +
+                " DELETE FROM Sirket;" +
+                " INSERT INTO Sirket(Adi) VALUES('" + Adi + "');" +
+                " UPDATE Sirket SET VergiNo = '" + VergiNo + "';" +
+                " UPDATE Sirket SET CustomerId = '" + CustomerId + "';" +
+                " SELECT Adi, VergiNo, CustomerId FROM Sirket; ";
+            SqlCommand sqlCommand = new SqlCommand(sqlString, sqlConnection);
+            int numberof_rows_effected = sqlCommand.ExecuteNonQuery();
+            log(numberof_rows_effected + " satır etkilendi.");
         }
 
         private void button5_Click(object sender, EventArgs e)
         {
-            DataTable dataTable = SmoApplication.EnumAvailableSqlServers(true);
-            listBox2.ValueMember = "Name";
-            listBox2.DataSource = dataTable;
+            listBox2.Items.Clear();
+            string ServerName = Environment.MachineName;
+            RegistryView registryView = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32;
+            using (RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, registryView))
+            {
+                RegistryKey instanceKey = hklm.OpenSubKey(@"SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL", false);
+                if (instanceKey != null)
+                {
+                    foreach (var instanceName in instanceKey.GetValueNames())
+                    {
+                        listBox2.Items.Add(ServerName + "\\" + instanceName);
+                    }
+                }
+            }
         }
 
         private void listBox2_SelectedIndexChanged(object sender, EventArgs e)
         {
-            listBox3.Items.Clear();
-            if (listBox2.SelectedIndex != -1)
+            sql_connection_string = @"Data Source=" + listBox2.SelectedItem.ToString() + "; Initial Catalog=DesenPOS; uid=sa; password=DesenErp.12345;";
+            textBox4.Text = sql_connection_string;
+            sqlConnection = new SqlConnection(sql_connection_string);
+            sqlConnection.Close();
+            try
             {
-                string serverName = listBox2.SelectedValue.ToString();
-                Server server = new Server(serverName);
-                try
+                sqlConnection.Open();
+            }
+            catch (Exception ex)
+            {
+                log(ex.Message);
+            }
+            if (sqlConnection.State == ConnectionState.Open)
+                log("Bağlantı başarılı.");
+            else
+                log("HATA! Bağlantı yapılamadı!");
+        }
+
+        private void button6_Click(object sender, EventArgs e)
+        {
+            Process.Start("database.sql");
+        }
+
+        private void richTextBox1_TextChanged(object sender, EventArgs e)
+        {
+            write(richTextBox1.Text);
+        }
+
+        private void write(string text)
+        {
+            StreamWriter streamWriter = new StreamWriter("notlarim.txt", append: false);
+            streamWriter.Write(text);
+            streamWriter.Close();
+        }
+
+        private string getspecs()
+        {
+            ComputerInfo computerInfo = new ComputerInfo();
+            IHardwareInfo hardwareInfo = new HardwareInfo();
+            hardwareInfo.RefreshMotherboardList();
+            hardwareInfo.RefreshCPUList();
+            hardwareInfo.RefreshMemoryStatus();
+            string text = "";
+            text = "İşletim Sistemi: " + computerInfo.OSFullName;
+            text += "\n\nAnakart: " + hardwareInfo.MotherboardList[0];
+            text += "\nİşlemci: " + hardwareInfo.CpuList[0];
+            text += "\nRAM: Toplam " + byteToGB((long)computerInfo.TotalPhysicalMemory);
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                if (drive.IsReady)
                 {
-                    foreach (Database database in server.Databases)
-                    {
-                        listBox3.Items.Add(database.Name);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    string exception = ex.Message;
-                    MessageBox.Show(ex.Message);
+                    text += "\nDisk " + drive.Name + ": Kullanılabilir alan " + byteToGB(drive.TotalFreeSpace);
                 }
             }
+            return text;
+        }
+
+        private string byteToGB(long bytes)
+        {
+            string[] Suffix = { "B", "KB", "MB", "GB", "TB" };
+            int i;
+            double dblSByte = bytes;
+            for (i = 0; i < Suffix.Length && bytes >= 1024; i++, bytes /= 1024)
+            {
+                dblSByte = bytes / 1024.0;
+            }
+            return String.Format("{0:0.##} {1}", dblSByte, Suffix[i]);
+        }
+
+        private void read()
+        {
+            if (File.Exists("notlarim.txt"))
+            {
+                StreamReader streamReader = new StreamReader("notlarim.txt");
+                string text = "";
+                while (!streamReader.EndOfStream)
+                {
+                    text += streamReader.ReadLine() + "\n";
+                }
+                richTextBox1.Text = text;
+                streamReader.Close();
+            }
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            sqlConnection.Close();
+        }
+
+        private void Form1_HelpRequested(object sender, HelpEventArgs hlpevent)
+        {
+            Process.Start("yardim.pdf");
+        }
+
+        private void button7_Click(object sender, EventArgs e)
+        {
+            Process.Start("C:\\DesenPOS\\DesenPos.exe");
         }
     }
 }
