@@ -11,6 +11,7 @@ using System.ComponentModel;
 using System.Data;
 using System.Data.Sql;
 using System.Data.SqlClient;
+using System.Data.SqlTypes;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -35,12 +36,12 @@ namespace DesenCompact
             desktop_path = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
             sqlConnection = new SqlConnection("");
             sql_connection_string = @"Data Source=.\DESENERP; Initial Catalog=DesenPOS; uid=sa; password=DesenErp.12345;";
-            read();
+            read("notlarim.txt");
             if (!File.Exists("notlarim.txt"))
             {
                 string text = "SPECS\n\n" + getspecs();
-                write(text);
-                read();
+                write(text, "notlarim.txt");
+                read("notlarim.txt");
             }
         }
 
@@ -95,84 +96,65 @@ namespace DesenCompact
             log("Malzeme arşivi C:\\DesenPOS yoluna çıkartılıyor... malzeme.rar");
             await extract("malzeme.rar", "C:\\DesenPOS", progressBar1);
             log($"Arşiv çıkarma işlemi tamamlandı.");
-            string shortcut_path = (desktop_path + "\\DesenPOS.lnk");
-            IWshRuntimeLibrary.WshShell shell = new IWshRuntimeLibrary.WshShell();
-            IWshRuntimeLibrary.IWshShortcut sc = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(shortcut_path);
-            sc.Description = "some desc";
-            sc.TargetPath = "C:\\DesenPOS\\DesenPos.exe";
-            sc.Save();
+            File.Copy("start.lnk", desktop_path + "\\DesenPOS.lnk");
+
+            //string shortcut_path = (desktop_path + "\\DesenPOS.lnk");
+
+            //IWshRuntimeLibrary.WshShell shell = new IWshRuntimeLibrary.WshShell();
+            //IWshRuntimeLibrary.IWshShortcut sc = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(shortcut_path);
+            //sc.Description = "some desc";
+            //sc.TargetPath = "C:\\DesenPOS\\DesenPos.exe";
+            //sc.Save();
             log($"DesenPOS kısayolu düzeltildi.");
-            Process.Start(desktop_path + "\\DesenPOS.lnk");
         }
 
         private void button4_Click(object sender, EventArgs e)
         {
             log("UPDATE...");
-            string Adi = textBox1.Text;
-            string VergiNo = textBox2.Text;
-            string CustomerId = textBox3.Text;
-            string sqlString = "use DesenPOS;" +
-                " DELETE FROM Sirket;" +
-                " INSERT INTO Sirket(Adi) VALUES('" + Adi + "');" +
-                " UPDATE Sirket SET VergiNo = '" + VergiNo + "';" +
-                " UPDATE Sirket SET CustomerId = '" + CustomerId + "';" +
-                " SELECT Adi, VergiNo, CustomerId FROM Sirket; ";
-            SqlCommand sqlCommand = new SqlCommand(sqlString, sqlConnection);
-            int numberof_rows_effected = sqlCommand.ExecuteNonQuery();
-            log(numberof_rows_effected + " satır etkilendi.");
+            string sqlString = "USE DesenPOS;\nSELECT * FROM Sirket;";
+            string Adi = "UPDATE Sirket SET Adi='" + textBox1.Text + "';";
+            sqlString += "\n" + Adi;
+            string VergiNo = "UPDATE Sirket SET VergiNo = '" + textBox2.Text + "';";
+            sqlString += "\n" + VergiNo;
+            string CustomerId = "UPDATE Sirket SET CustomerId = '" + textBox3.Text + "';";
+            if (!textBox3.Text.Equals("")) {
+                sqlString += "\n" + CustomerId;
+                sqlString += "\n" + "SELECT Adi, VergiNo, CustomerId FROM Sirket;";
+            } else
+            {
+                sqlString += "\n" + "SELECT Adi, VergiNo FROM Sirket;";
+            }
+            if (File.Exists("update.sql"))
+                File.Delete("update.sql");
+            write(sqlString, "update.sql");
+            Process.Start("update.sql");
         }
 
-        private void button5_Click(object sender, EventArgs e)
+        private async void button5_Click(object sender, EventArgs e)
         {
-            listBox2.Items.Clear();
-            string ServerName = Environment.MachineName;
-            RegistryView registryView = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Registry32;
-            using (RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, registryView))
-            {
-                RegistryKey instanceKey = hklm.OpenSubKey(@"SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL", false);
-                if (instanceKey != null)
-                {
-                    foreach (var instanceName in instanceKey.GetValueNames())
-                    {
-                        listBox2.Items.Add(ServerName + "\\" + instanceName);
-                    }
-                }
-            }
-        }
+            Directory.CreateDirectory("surum");
+            log("Alt klasör oluşturuldu: surum");
+            log("Sürüm arşivi çıkartılıyor... surum.rar");
+            await extract("surum.rar", "C:\\DesenPOS", progressBar1);
+            log($"Sürüm atma işlemi tamamlandı.");
+            Process.Start("C:\\DesenPOS\\versiyon.txt");
 
-        private void listBox2_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            sql_connection_string = @"Data Source=" + listBox2.SelectedItem.ToString() + "; Initial Catalog=DesenPOS; uid=sa; password=DesenErp.12345;";
-            textBox4.Text = sql_connection_string;
-            sqlConnection = new SqlConnection(sql_connection_string);
-            sqlConnection.Close();
-            try
-            {
-                sqlConnection.Open();
-            }
-            catch (Exception ex)
-            {
-                log(ex.Message);
-            }
-            if (sqlConnection.State == ConnectionState.Open)
-                log("Bağlantı başarılı.");
-            else
-                log("HATA! Bağlantı yapılamadı!");
         }
 
         private void button6_Click(object sender, EventArgs e)
         {
-            Process.Start("database.sql");
+            log("Database.sql dosyası çalıştırılıyor...");
+            Process.Start("Database.sql");
         }
 
         private void richTextBox1_TextChanged(object sender, EventArgs e)
         {
-            write(richTextBox1.Text);
+            write(richTextBox1.Text, "notlarim.txt");
         }
 
-        private void write(string text)
+        private void write(string text, string path)
         {
-            StreamWriter streamWriter = new StreamWriter("notlarim.txt", append: false);
+            StreamWriter streamWriter = new StreamWriter(path, append: false);
             streamWriter.Write(text);
             streamWriter.Close();
         }
@@ -211,7 +193,7 @@ namespace DesenCompact
             return String.Format("{0:0.##} {1}", dblSByte, Suffix[i]);
         }
 
-        private void read()
+        private void read(string path)
         {
             if (File.Exists("notlarim.txt"))
             {
@@ -238,7 +220,18 @@ namespace DesenCompact
 
         private void button7_Click(object sender, EventArgs e)
         {
-            Process.Start("C:\\DesenPOS\\DesenPos.exe");
+
+            Process.Start("start.lnk");
+        }
+
+        private void button8_Click(object sender, EventArgs e)
+        {
+            Process.Start("explorer.exe", "kurulum");
+        }
+
+        private void button9_Click(object sender, EventArgs e)
+        {
+            Process.Start("explorer.exe","C:\\DesenPOS");
         }
     }
 }
